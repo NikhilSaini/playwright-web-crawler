@@ -1,6 +1,7 @@
 import streamlit as st
 from urllib.parse import urljoin, urlparse
 from playwright.sync_api import sync_playwright
+from bs4 import BeautifulSoup
 
 visited_urls = set()
 
@@ -8,21 +9,26 @@ def get_links_playwright(url, base_domain):
     links = {}
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch()
+            browser = p.chromium.launch(headless=False)  # Run in headed mode
             page = browser.new_page()
-            page.goto(url, timeout=20000, wait_until="networkidle")
-            page.wait_for_timeout(3000)  # Wait additional 3 seconds for JS rendering
+            page.goto(url, timeout=30000, wait_until="networkidle")
+            page.wait_for_timeout(8000)  # Wait 8 seconds for JS to render fully
 
-            anchors = page.query_selector_all("a[href]")
+            # Screenshot for debug
+            page.screenshot(path="debug.png", full_page=True)
+
+            # Parse the full rendered DOM
+            html = page.content()
+            soup = BeautifulSoup(html, 'html.parser')
+            anchors = soup.find_all('a', href=True)
             print(f"Found {len(anchors)} anchors on {url}")
 
-            for anchor in anchors:
-                href = anchor.get_attribute("href")
-                text = anchor.inner_text().strip()[:100]
-                if href:
-                    full_url = urljoin(url, href)
-                    if urlparse(full_url).netloc == base_domain and full_url not in visited_urls:
-                        links[text or href] = full_url
+            for a in anchors:
+                href = a['href']
+                text = a.get_text(strip=True)[:100]
+                full_url = urljoin(url, href)
+                if urlparse(full_url).netloc == base_domain and full_url not in visited_urls:
+                    links[text or href] = full_url
             browser.close()
     except Exception as e:
         print(f"[ERROR] {e}")
@@ -60,7 +66,7 @@ if st.button("Start Crawling"):
             for text, href in links.items():
                 st.markdown(f"- [{text}]({href})")
         else:
-            st.warning("No links found. This may be due to JavaScript rendering delay or DOM protection.")
-            st.code("Try increasing wait time or checking if the page uses iframe / delayed JS.")
+            st.warning("No links found. This may be due to JavaScript rendering delay, iframe use, or bot protection.")
+            st.code("Try increasing wait time, inspecting screenshot (debug.png), or reviewing page structure.")
     else:
         st.warning("Please enter a valid URL.")
