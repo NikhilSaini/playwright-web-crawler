@@ -9,19 +9,20 @@ def get_links_playwright(url, base_domain):
     links = {}
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=False)  # Run in headed mode
-            page = browser.new_page()
+            browser = p.chromium.launch(headless=False)  # Run in headed mode to mimic real user
+            context = browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/119.0.0.0 Safari/537.36")
+            page = context.new_page()
             page.goto(url, timeout=30000, wait_until="networkidle")
-            page.wait_for_timeout(8000)  # Wait 8 seconds for JS to render fully
+            page.wait_for_timeout(15000)  # Wait 15 seconds for complete JS rendering
 
             # Screenshot for debug
             page.screenshot(path="debug.png", full_page=True)
 
-            # Parse the full rendered DOM
+            # First, parse the main page content
             html = page.content()
             soup = BeautifulSoup(html, 'html.parser')
             anchors = soup.find_all('a', href=True)
-            print(f"Found {len(anchors)} anchors on {url}")
+            print(f"Found {len(anchors)} anchors on main page of {url}")
 
             for a in anchors:
                 href = a['href']
@@ -29,6 +30,24 @@ def get_links_playwright(url, base_domain):
                 full_url = urljoin(url, href)
                 if urlparse(full_url).netloc == base_domain and full_url not in visited_urls:
                     links[text or href] = full_url
+
+            # Then, check iframes and scrape their links too
+            for frame in page.frames:
+                if frame.url != page.url:
+                    try:
+                        frame_html = frame.content()
+                        frame_soup = BeautifulSoup(frame_html, 'html.parser')
+                        frame_anchors = frame_soup.find_all('a', href=True)
+                        print(f"Found {len(frame_anchors)} anchors in iframe: {frame.url}")
+                        for a in frame_anchors:
+                            href = a['href']
+                            text = a.get_text(strip=True)[:100]
+                            full_url = urljoin(frame.url, href)
+                            if urlparse(full_url).netloc == base_domain and full_url not in visited_urls:
+                                links[text or href] = full_url
+                    except Exception as e:
+                        print(f"[Iframe ERROR] {e}")
+
             browser.close()
     except Exception as e:
         print(f"[ERROR] {e}")
