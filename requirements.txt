@@ -1,3 +1,4 @@
 streamlit
 playwright
+undetected-chromedriver
 beautifulsoup4
